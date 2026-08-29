@@ -1,6 +1,5 @@
 import io
 import os
-import zipfile
 import re
 import base64
 from datetime import datetime, timedelta
@@ -11,12 +10,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from bs4 import BeautifulSoup
 import streamlit as st
-import streamlit.components.v1 as components
 import time
 from PIL import Image, ImageOps
-
-# --- GitHub Integration ---
-from github import Github
 
 # --- Selenium Imports for University Portal ---
 from selenium import webdriver
@@ -93,7 +88,7 @@ st.markdown(
         -ms-overflow-style: none !important;
         scrollbar-width: none !important;
     }
-    
+
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) > div > div[data-testid="stVerticalBlock"]::-webkit-scrollbar {
         display: none !important;
     }
@@ -118,7 +113,7 @@ st.markdown(
         max-width: 44px !important;
         padding: 0 !important;
         margin: 0 !important;
-        display: block !important; /* <--- REMOVES FLEXBOX SQUISH */
+        display: block !important;
         text-align: center !important;
         box-shadow: none !important;
         transition: all 0.2s ease !important;
@@ -137,12 +132,12 @@ st.markdown(
         height: 100% !important;
         margin: 0 !important;
         padding: 0 !important;
-        line-height: 42px !important; /* Centers text vertically exactly inside the 44px box */
+        line-height: 42px !important;
         color: #e0e0e0 !important;
         font-size: 14px !important;
         font-weight: 400 !important;
         font-variant-numeric: tabular-nums !important;
-        white-space: nowrap !important; /* FORBIDS STACKING */
+        white-space: nowrap !important;
         word-break: keep-all !important;
         letter-spacing: 0px !important;
     }
@@ -152,7 +147,7 @@ st.markdown(
         border: 2px solid #75d466 !important;
         background-color: #1a2218 !important;
     }
-    
+
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) button[kind="primary"] p {
         color: #ffffff !important;
         font-weight: 600 !important;
@@ -167,10 +162,10 @@ st.markdown(
         box-shadow: none !important;
         padding: 0 !important;
         display: block !important;
-        line-height: 42px !important; /* Perfectly align arrows with the text */
+        line-height: 42px !important; 
         text-align: center !important;
     }
-    
+
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1) button:hover,
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(3) button:hover {
         opacity: 0.7 !important;
@@ -184,36 +179,26 @@ st.markdown(
 st.title("DYNAMIC TIMETABLE GENERATOR")
 
 # ==========================================
-# 2. INITIALIZE SESSION STATES (MULTI-USER)
+# 2. INITIALIZE SESSION STATES
 # ==========================================
-if "user_session_id" not in st.session_state:
-    import uuid
-    st.session_state.user_session_id = str(uuid.uuid4())
-
 if "live_html_data" not in st.session_state:
     st.session_state.live_html_data = None
-if "auto_enrolled" not in st.session_state:
-    st.session_state.auto_enrolled = ""
-if "raw_enrolled_html_data" not in st.session_state:
-    st.session_state.raw_enrolled_html_data = None
+if "live_enrolled_html" not in st.session_state:
+    st.session_state.live_enrolled_html = None
 if "waiting_for_captcha" not in st.session_state:
     st.session_state.waiting_for_captcha = False
 if "live_driver" not in st.session_state:
     st.session_state.live_driver = None
 if "captcha_img_bytes" not in st.session_state:
     st.session_state.captcha_img_bytes = None
-if "error_screenshot_bytes" not in st.session_state:
-    st.session_state.error_screenshot_bytes = None
 
 # ==========================================
 # 3. GET SYNC TIME FOR UI
 # ==========================================
-html_content = ""
-if st.session_state.get("live_html_data"):
-    html_content = st.session_state.live_html_data
+html_content = st.session_state.get("live_html_data") or ""
 
 time_match = re.search(r"<!-- SYNC_TIME: (.*?) -->", html_content)
-updated_str = time_match.group(1) if time_match else "Not synced yet"
+updated_str = time_match.group(1) if time_match else "No active session data"
 
 # Display Last Update on the Main Page
 st.markdown(
@@ -229,17 +214,19 @@ if st.session_state.get("captcha_img_bytes"):
     try:
         image_stream = io.BytesIO(st.session_state.captcha_img_bytes)
         img = Image.open(image_stream).convert("RGB") 
+        # Invert colors (White background becomes black, dark text becomes bright)
         inverted_img = ImageOps.invert(img)
         rgba_img = inverted_img.convert("RGBA")
         data = rgba_img.getdata()
-        
+
         new_data = []
         for item in data:
+            # Turn the new black background transparent
             if item[0] < 60 and item[1] < 60 and item[2] < 60:
                 new_data.append((255, 255, 255, 0)) 
             else:
                 new_data.append(item) 
-                
+
         rgba_img.putdata(new_data)
         buffered = io.BytesIO()
         rgba_img.save(buffered, format="PNG") 
@@ -247,11 +234,13 @@ if st.session_state.get("captcha_img_bytes"):
     except Exception:
         captcha_b64 = base64.b64encode(st.session_state.captcha_img_bytes).decode("utf-8")
 
+
 st.markdown(
     f"""
     <style>
         .stCaption {{display: none;}}
-        
+
+        /* 4-Color Theme: Black, Dark Gray, Light Gray, White */
         .stApp {{
             background-color: #000000;
             color: #ffffff;
@@ -288,7 +277,8 @@ st.markdown(
             margin-top: 20px;
             text-align: center;
         }}
-        
+
+        /* UI TIGHTENING CSS (Squish Elements in Card) */
         [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {{
             padding: 0.2rem 0.8rem 0.2rem 0.8rem !important; 
             background-color: #1a1a1a !important;
@@ -296,7 +286,8 @@ st.markdown(
             border: 1px solid #2a2a2a !important;
             margin-bottom: 12px !important;
         }}
-        
+
+        /* Pull the button closer to the header text */
         [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stMarkdownContainer"] {{
             margin-bottom: -10px !important;
         }}
@@ -308,7 +299,8 @@ st.markdown(
             overflow: hidden !important; 
             margin-bottom: 0px !important; 
         }}
-        
+
+        /* NUCLEAR CSS: DESTROY TOOLTIPS & TICK BARS */
         [data-testid="stTickBar"], 
         [data-testid="stTickBarMin"], 
         [data-testid="stTickBarMax"] {{
@@ -331,7 +323,7 @@ st.markdown(
             box-shadow: none !important;
             outline: none !important;
         }}
-        
+
         div[data-baseweb="slider"][aria-disabled="true"] div[role="slider"] {{
             background-color: #555555 !important;
         }}
@@ -340,6 +332,7 @@ st.markdown(
             align-items: center !important;
         }}
 
+        /* CAPTCHA INJECTION & FORM STYLING */
         [data-testid="stSidebar"] input[aria-label^="CAPTCHA"] {{
             background-image: url("data:image/png;base64,{captcha_b64}") !important;
             background-position: right 6px center !important;
@@ -347,7 +340,7 @@ st.markdown(
             background-repeat: no-repeat !important;
             padding-right: 120px !important; 
         }}
-        
+
         [data-testid="stSidebar"] div[data-testid="stTextInput"]:focus-within {{
             border: 1px solid #ff4b4b !important;
             box-shadow: 0 0 0 1px #ff4b4b !important;
@@ -384,7 +377,7 @@ st.markdown(
         [data-testid="stSidebar"] [data-testid="stTextInput"] div[role="button"] {{
             background-color: transparent !important;
         }}
-        
+
         [data-testid="stForm"] {{
             border: none !important;
             padding: 0 !important;
@@ -400,7 +393,7 @@ st.markdown(
             height: 0 !important;
             width: 0 !important;
         }}
-        
+
         [data-testid="stSidebar"] button[kind="primary"] {{
             background-color: #ff4b4b !important; 
             border: none !important;
@@ -438,23 +431,24 @@ st.markdown(
             line-height: 1.3 !important;
         }}
 
+        /* FIX SPINNER ALIGNMENT */
         [data-testid="stSpinner"] {{
             align-items: center !important;
             margin-top: 10px !important;
         }}
-        
+
         [data-testid="stSpinner"] div[data-testid="stMarkdownContainer"] {{
             margin: 0 !important;
             padding: 0 !important;
             display: flex !important;
             align-items: center !important;
         }}
-        
+
         [data-testid="stSpinner"] p {{
             margin: 0 !important;
             padding: 0 !important;
         }}
-        
+
     </style>
     """,
     unsafe_allow_html=True
@@ -465,8 +459,6 @@ st.markdown(
 # ==========================================
 
 def init_browser_and_get_captcha():
-    import tempfile
-    
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
@@ -474,67 +466,35 @@ def init_browser_and_get_captcha():
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    # Isolate user profile directory for session safety
-    user_data_dir = tempfile.mkdtemp()
-    options.add_argument(f"--user-data-dir={user_data_dir}")
-    options.add_argument("--remote-debugging-pipe")
 
     options.binary_location = "/usr/bin/chromium"
     service = Service("/usr/bin/chromedriver")
-    
+
     driver = webdriver.Chrome(service=service, options=options)
-    
+
     try:
-        # Ensure the headless window is properly sized so elements have a non-zero width
-        driver.set_window_size(1920, 1080)
         driver.get("https://sso.iu.edu.sa")
-        time.sleep(3) 
-        
+        time.sleep(2) 
+
         try:
             uni_login_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'الجامعي') or contains(text(), 'Employee')]")
             if uni_login_btn.is_displayed():
                 driver.execute_script("arguments[0].click();", uni_login_btn)
-                time.sleep(1.5)
+                time.sleep(1)
         except:
             pass 
 
-        # Wait until at least one image with an actual width is rendered on the screen
-        WebDriverWait(driver, 15).until(
-            lambda d: any(img.size['width'] > 0 for img in d.find_elements(By.TAG_NAME, "img"))
-        )
+        try:
+            captcha_img_element = driver.find_element(By.XPATH, "//img[contains(translate(@src, 'CAPTCHA', 'captcha'), 'captcha')]")
+        except:
+            captcha_img_element = driver.find_element(By.XPATH, "(//form//img)[last()]")
 
-        # Get ONLY images that have physical dimensions (filters out hidden tracking pixels)
-        visible_images = [
-            img for img in driver.find_elements(By.TAG_NAME, "img") 
-            if img.size['width'] > 0 and img.size['height'] > 0
-        ]
-
-        if not visible_images:
-            raise Exception("No visible images found on the login page.")
-
-        # Identify the CAPTCHA among the visible images
-        captcha_img_element = None
-        for img in visible_images:
-            src = (img.get_attribute("src") or "").lower()
-            img_id = (img.get_attribute("id") or "").lower()
-            img_class = (img.get_attribute("class") or "").lower()
-            
-            if "captcha" in src or "captcha" in img_id or "captcha" in img_class:
-                captcha_img_element = img
-                break
-
-        # Fallback: Use the last genuinely visible image on the page
-        if not captcha_img_element:
-            captcha_img_element = visible_images[-1]
-        
-        # Safe screenshot knowing width > 0
         img_bytes = captcha_img_element.screenshot_as_png
-        
+
         st.session_state.live_driver = driver
         st.session_state.captcha_img_bytes = img_bytes
         st.session_state.waiting_for_captcha = True
-        
+
     except Exception as e:
         driver.quit()
         raise Exception(f"Failed to initialize login page. {str(e)}")
@@ -548,32 +508,32 @@ def submit_captcha_and_scrape(username, password, captcha_val):
         user_field = text_inputs[0]
         captcha_input = text_inputs[-1] 
         pass_field = driver.find_element(By.XPATH, "//input[@type='password']")
-        
+
         user_field.clear()
         user_field.send_keys(username)
         pass_field.clear()
         pass_field.send_keys(password)
         captcha_input.clear()
         captcha_input.send_keys(captcha_val)
-        
+
         time.sleep(0.5) 
         captcha_input.send_keys(Keys.RETURN)
-        
+
         try:
             WebDriverWait(driver, 15).until(EC.url_contains("Dashboard"))
         except:
-            st.session_state.error_screenshot_bytes = driver.get_screenshot_as_png()
+            driver.save_screenshot("error_screenshot.png")
             raise Exception("Login rejected! Please check your Student ID, Password, or CAPTCHA.")
-            
+
         ksa_time = datetime.utcnow() + timedelta(hours=3)
         time_str = ksa_time.strftime("%d/%m/%Y at %I:%M %p")
-            
+
         driver.get("https://cas.iu.edu.sa/cas/eregister")
-        
+
         WebDriverWait(driver, 35).until(
             EC.url_contains("homeIndex.faces")
         )
-        
+
         electronic_reg_menu = WebDriverWait(driver, 25).until(
             EC.presence_of_element_located((By.XPATH, "//a[contains(., 'التسجيل الإلكتروني') or contains(., 'Electronic')]"))
         )
@@ -585,16 +545,16 @@ def submit_captcha_and_scrape(username, password, captcha_val):
         )
         driver.execute_script("arguments[0].click();", enrolled_menu)
         time.sleep(4) 
-        
+
         soup_enrolled = BeautifulSoup(driver.page_source, "html.parser")
-        
+
         enrolled_tbody = None
         for tbody in soup_enrolled.find_all("tbody"):
             first_tr = tbody.find("tr")
             if first_tr and first_tr.has_attr("class") and len(first_tr["class"]) > 0 and first_tr["class"][0] in ["ROW1", "ROW2"]:
                 enrolled_tbody = tbody
                 break
-                
+
         enrolled_ids = []
         if enrolled_tbody:
             for tr in enrolled_tbody.find_all("tr", class_=lambda c: c in ["ROW1", "ROW2"]):
@@ -603,9 +563,9 @@ def submit_captcha_and_scrape(username, password, captcha_val):
                     shuba = cols[3].text.strip()
                     if shuba.isdigit():
                         enrolled_ids.append(shuba)
-                        
+
         enrolled_str = ", ".join(enrolled_ids)
-        raw_enrolled_html = f"<!-- SYNC_TIME: {time_str} -->\n" + str(enrolled_tbody) if enrolled_tbody else f"<!-- SYNC_TIME: {time_str} -->\n<tbody></tbody>"
+        raw_enrolled_html = f"<!-- SYNC_TIME: {time_str} -->\n" + (str(enrolled_tbody) if enrolled_tbody else "<tbody></tbody>")
 
         electronic_reg_menu = driver.find_element(By.XPATH, "//a[contains(., 'التسجيل الإلكتروني') or contains(., 'Electronic')]")
         driver.execute_script("arguments[0].click();", electronic_reg_menu)
@@ -615,25 +575,25 @@ def submit_captcha_and_scrape(username, password, captcha_val):
             EC.presence_of_element_located((By.XPATH, "//a[contains(., 'المقررات المطروحة وفق الخطة') or contains(., 'Course')]"))
         )
         driver.execute_script("arguments[0].click();", course_plan_menu)
-        
+
         time.sleep(5)
-        
+
         soup = BeautifulSoup(driver.page_source, "html.parser")
         target_tbody = None
-        
+
         for tbody in soup.find_all("tbody"):
             first_tr = tbody.find("tr")
             if first_tr and first_tr.has_attr("class"):
                 target_tbody = tbody
                 break
-                
+
         if target_tbody is None:
-            st.session_state.error_screenshot_bytes = driver.get_screenshot_as_png()
+            driver.save_screenshot("error_screenshot.png")
             raise Exception("Could not find the main timetable <tbody>.")
-            
+
         final_html = f"<!-- SYNC_TIME: {time_str} -->\n<!-- STUDENT_ID: {username} -->\n" + str(target_tbody)
         return final_html, raw_enrolled_html, enrolled_str
-        
+
     finally:
         driver.quit()
         st.session_state.live_driver = None
@@ -718,25 +678,18 @@ def parse_html_to_dataframe(html_content):
 
     return pd.DataFrame(extracted_rows)
 
-def push_to_github(repo, file_path, content, commit_message):
-    try:
-        contents = repo.get_contents(file_path)
-        repo.update_file(contents.path, commit_message, content, contents.sha)
-    except Exception:
-        repo.create_file(file_path, commit_message, content)
-
-
 # ==========================================
 # 5. SIDEBAR - FETCH PORTAL DATA (CONTAINER)
 # ==========================================
 with st.sidebar.container(border=True):
     st.markdown("### 🌐 Sync Data From Portal")
-    
+
     # --- PHASE 1: Fetch Captcha Session ---
     if not st.session_state.waiting_for_captcha:
         if st.button("Login And Scrap Data from Portal", use_container_width=True):
-            st.session_state.error_screenshot_bytes = None
-                
+            if os.path.exists("error_screenshot.png"):
+                os.remove("error_screenshot.png")
+
             with st.spinner("Connecting to sso.iu.edu.sa"):
                 try:
                     init_browser_and_get_captcha()
@@ -746,6 +699,7 @@ with st.sidebar.container(border=True):
 
     # --- PHASE 2: The UI Form ---
     else:
+        # Dynamically invert, remove background, and inject the CAPTCHA
         if st.session_state.get("captcha_img_bytes"):
             try:
                 image_stream = io.BytesIO(st.session_state.captcha_img_bytes)
@@ -753,22 +707,22 @@ with st.sidebar.container(border=True):
                 inverted_img = ImageOps.invert(img)
                 rgba_img = inverted_img.convert("RGBA")
                 data = rgba_img.getdata()
-                
+
                 new_data = []
                 for item in data:
                     if item[0] < 50 and item[1] < 50 and item[2] < 50:
                         new_data.append((255, 255, 255, 0)) 
                     else:
                         new_data.append(item) 
-                        
+
                 rgba_img.putdata(new_data)
                 buffered = io.BytesIO()
                 rgba_img.save(buffered, format="PNG") 
                 captcha_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                
+
             except Exception as e:
                 captcha_b64 = base64.b64encode(st.session_state.captcha_img_bytes).decode("utf-8")
-                
+
             st.markdown(
                 f"""
                 <style>
@@ -789,7 +743,7 @@ with st.sidebar.container(border=True):
             portal_pass = st.text_input("Pass", type="password", placeholder="Enter Password", label_visibility="collapsed")
             user_captcha = st.text_input("CAPTCHA", placeholder="Enter Captcha Code", max_chars=5, label_visibility="collapsed")
             submit_form = st.form_submit_button("Continue", type="primary", use_container_width=True)
-            
+
         if submit_form:
             if not portal_user or not portal_pass:
                 st.error("Please enter your Student ID and Password.")
@@ -800,33 +754,25 @@ with st.sidebar.container(border=True):
                     try:
                         st.session_state.portal_user = portal_user
                         st.session_state.portal_pass = portal_pass
-                        
+
                         raw_live_html, raw_enrolled_html, auto_enrolled = submit_captcha_and_scrape(
                             st.session_state.portal_user, 
                             st.session_state.portal_pass, 
                             user_captcha
                         )
                         
-                        # SAVE DIRECTLY IN SESSION STATE (Multi-user safe)
+                        # Save scraped data strictly to session state
                         st.session_state.live_html_data = raw_live_html
-                        st.session_state.raw_enrolled_html_data = raw_enrolled_html
+                        st.session_state.live_enrolled_html = f"<!-- STUDENT_ID: {st.session_state.portal_user} -->\n" + raw_enrolled_html
                         st.session_state.auto_enrolled = auto_enrolled
-                        
-                        if "GITHUB_TOKEN" in st.secrets and "GITHUB_REPO" in st.secrets:
-                            try:
-                                g = Github(st.secrets["GITHUB_TOKEN"])
-                                repo = g.get_repo(st.secrets["GITHUB_REPO"])
-                                push_to_github(repo, "data.html", raw_live_html, "Bot synced timetable <tbody>")
-                                push_to_github(repo, "enrolled.html", raw_enrolled_html, "Bot synced enrolled classes <tbody>")
-                                st.success("✅ Synced session data and pushed both files to GitHub!")
-                            except Exception as github_e:
-                                st.warning(f"Saved in session state, but GitHub push failed: {github_e}")
-                        else:
-                            st.success("✅ Synced and saved session state successfully.")
-                        
-                        st.session_state.error_screenshot_bytes = None
+
+                        st.success("✅ Synced and saved to current session!")
+
+                        if os.path.exists("error_screenshot.png"):
+                            os.remove("error_screenshot.png")
+
                         st.rerun() 
-                            
+
                     except Exception as e:
                         st.error(f"Sync failed: {e}")
                         if st.session_state.live_driver:
@@ -848,9 +794,9 @@ if raw_df is None or raw_df.empty:
     if st.session_state.waiting_for_captcha:
         pass # Let the user fill out the form
     else:
-        st.info("👋 Welcome! Please log in via the sidebar portal to fetch your schedule.")
-        if st.session_state.get("error_screenshot_bytes"):
-            st.image(st.session_state.error_screenshot_bytes, caption="Bot's view during the last failed attempt:")
+        st.error("⚠️ No schedule data found in session. Please login to fetch fresh data.")
+        if os.path.exists("error_screenshot.png"):
+            st.image("error_screenshot.png", caption="Bot's view during the last failed attempt:")
     st.stop()
 
 
@@ -860,22 +806,32 @@ if raw_df is None or raw_df.empty:
 with st.sidebar.container(border=True):
     st.markdown("### 📥 Export Raw Data")
     try:
+        # 1. Extract and format the exact sync time & ID from session state
         formatted_time = "UnknownTime"
-        extracted_id = st.session_state.get("portal_user", "UnknownID")
-        
+        extracted_id = "UnknownID"
+
         if st.session_state.get("live_html_data"):
-            match_time = re.search(r'<!-- SYNC_TIME:\s*(.*?)\s*-->', st.session_state.live_html_data)
+            content = st.session_state.live_html_data[:500] 
+
+            # Get Time
+            match_time = re.search(r'<!-- SYNC_TIME:\s*(.*?)\s*-->', content)
             if match_time:
                 raw_time_str = match_time.group(1)
                 parsed_time = pd.to_datetime(raw_time_str) 
                 formatted_time = parsed_time.strftime("%d%m%y%H%M")
-        
+
+            # Get Student ID
+            match_id = re.search(r'<!-- STUDENT_ID:\s*(.*?)\s*-->', content)
+            if match_id:
+                extracted_id = match_id.group(1).strip()
+
+        # 2. Build the exact filename requested
         excel_filename = f"MATROOHAT ({extracted_id}) {formatted_time}.xlsx"
-        
+
         raw_excel_buffer = io.BytesIO()
         with pd.ExcelWriter(raw_excel_buffer, engine='openpyxl') as writer:
             raw_df.to_excel(writer, index=False, sheet_name="Scraped_Data")
-        
+
         st.download_button(
             label="Download All Scraped Data (Excel)",
             data=raw_excel_buffer.getvalue(),
@@ -896,7 +852,7 @@ def parse_schedule_blocks(df_input):
         venue_str = str(row["VENUE"]).strip()
         if venue_str == "nan" or not venue_str:
             continue
-    
+
         blocks = [b.strip() for b in venue_str.split(",")]
         for block in blocks:
             if "-" in block:
@@ -918,6 +874,12 @@ parsed_df = parse_schedule_blocks(raw_df)
 if parsed_df.empty:
     st.error("⚠️ The scraped data contains no valid schedule blocks. The university portal might be empty.")
     st.stop()
+
+# =========================================================================================================================
+# =========================================================================================================================
+# ===============================================Filters===================================================================
+# =========================================================================================================================
+# =========================================================================================================================
 
 # ==========================================
 # 9. PURE NATIVE STREAMLIT FILTERS (Tight UI)
@@ -949,7 +911,7 @@ with st.sidebar.expander("⚙️ Filter By Day & Time", expanded=st.session_stat
                     key=f"slide_{day_num}", 
                     label_visibility="collapsed"
                 )
-                
+
                 ex_list = []
                 exception_str = st.text_input(
                     "Exceptions", 
@@ -958,7 +920,7 @@ with st.sidebar.expander("⚙️ Filter By Day & Time", expanded=st.session_stat
                     key=f"txt_{day_num}", 
                     label_visibility="collapsed"
                 )
-                
+
                 if exception_str.strip():
                     try:
                         ex_list = [int(x.strip()) for x in exception_str.split(",") if x.strip().isdigit()]
@@ -976,7 +938,7 @@ with st.sidebar.expander("⚙️ Filter By Day & Time", expanded=st.session_stat
                     key=f"slide_dis_{day_num}", 
                     label_visibility="collapsed"
                 )
-                
+
                 st.text_input(
                     "Exceptions", 
                     value="",
@@ -985,7 +947,7 @@ with st.sidebar.expander("⚙️ Filter By Day & Time", expanded=st.session_stat
                     label_visibility="collapsed",
                     disabled=True
                 )
-                
+
                 day_filters[day_num] = None
                 day_exceptions[day_num] = []
 
@@ -1010,8 +972,8 @@ with st.sidebar.expander("⚙️ Filter By Availability", expanded=st.session_st
     enrolled_ids_str = st.session_state.get("auto_enrolled", "")
     enrolled_ids = [s.strip() for s in enrolled_ids_str.split(",") if s.strip()]
 
-    if not enrolled_ids and st.session_state.get("raw_enrolled_html_data"):
-        soup_enc = BeautifulSoup(st.session_state.raw_enrolled_html_data, "html.parser")
+    if not enrolled_ids and st.session_state.get("live_enrolled_html"):
+        soup_enc = BeautifulSoup(st.session_state.live_enrolled_html, "html.parser")
         for tr in soup_enc.find_all("tr", class_=lambda c: c in ["ROW1", "ROW2"]):
             cols = tr.find_all("td")
             if len(cols) >= 4:
@@ -1023,7 +985,7 @@ with st.sidebar.expander("⚙️ Filter By Availability", expanded=st.session_st
         show_opened = st.checkbox("Opened", value=True)
         show_enrolled = st.checkbox("Enrolled", value=True)
         show_closed = st.checkbox("Closed", value=False)
-        
+
         closed_mask = valid_blocks_df["STATUS"].astype(str).str.contains("مغلقة", na=False)
         is_enrolled_mask = valid_blocks_df["ID"].astype(str).isin(enrolled_ids) if enrolled_ids else pd.Series(False, index=valid_blocks_df.index)
 
@@ -1094,7 +1056,7 @@ if required_shubas:
 with st.sidebar.expander("⚙️ Filter By teachers", expanded=st.session_state["exp_teachers"]):
     all_subjects = [str(c) for c in raw_df["CODE"].dropna().drop_duplicates().astype(str)]
     subject_rules = {}
-    
+
     if not all_subjects:
         st.markdown("<p style='color: #888888; font-size: 14px;'>No subjects available to filter.</p>", unsafe_allow_html=True)
 
@@ -1104,7 +1066,7 @@ with st.sidebar.expander("⚙️ Filter By teachers", expanded=st.session_state[
 
         with st.container(border=True):
             st.markdown(f"<div dir='rtl' style='font-size: 14px; font-weight: bold; margin-bottom: 4px; color: #ffffff; text-align: right;'>📚 {subj_name}</div>", unsafe_allow_html=True)
-            
+
             teachers_for_subj = sorted(
                 raw_df[raw_df["CODE"].astype(str) == subj]["TEACHER"].astype(str).unique()
             )
@@ -1119,6 +1081,7 @@ with st.sidebar.expander("⚙️ Filter By teachers", expanded=st.session_state[
 
             subject_rules[subj] = {"ban": banned_t, "require": required_t}
 
+# Process the rules correctly
 for subj, rules in subject_rules.items():
     if rules["ban"]:
         valid_blocks_df = valid_blocks_df[
@@ -1135,10 +1098,13 @@ for subj, rules in subject_rules.items():
             )
         ]
 
+
+
 # ==========================================
 # 12. DATA GROUPING & SOLVER
 # ==========================================
 sections_by_subject = {}
+# Use an ordered collection to preserve the exact appearance order from raw_df
 for code, group in valid_blocks_df.groupby("CODE", sort=False):
     sections_by_subject[str(code)] = []
     for sec_id, sec_group in group.groupby("ID", sort=False):
@@ -1230,6 +1196,125 @@ def fix_arabic(text):
         return ""
     return get_display(arabic_reshaper.reshape(str(text)))
 
+def draw_schedule_image(schedule):
+    import matplotlib.font_manager as fm
+
+    # Setup figure with dark background
+    fig, ax = plt.subplots(figsize=(12, 7), facecolor='#000000')
+    ax.set_facecolor('#000000')
+    ax.axis("tight")
+    ax.axis("off")
+
+    # Correct right-to-left column headers matching visual view
+    cols = ["الوقت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"]
+    cols_reshaped = [fix_arabic(c) for c in cols]
+
+    # Dynamically find active hours just like the visual view
+    active_hours = set()
+    for section in schedule:
+        for b in section["blocks"]:
+            active_hours.add(b["start_time"])
+    sorted_hours = sorted(list(active_hours))
+
+    if not sorted_hours:
+        sorted_hours = list(range(8, 13))
+
+    num_rows = len(sorted_hours)
+    cell_text = [["" for _ in range(6)] for _ in range(num_rows)]
+    cell_details = [["" for _ in range(6)] for _ in range(num_rows)]
+
+    # Map day numbers to column index (Sunday=1 -> col 1, Monday=2 -> col 2, etc.)
+    col_map = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
+
+    for row_idx, hour in enumerate(sorted_hours):
+        cell_text[row_idx][0] = f"{hour}:00"
+
+    for section in schedule:
+        code_val = section['code']
+        sec_id = section['id']
+        raw_hall = str(section.get('hall', '')).replace("ش", "").replace("SHR", "").strip()
+        hall_str = f" - قــ {raw_hall}" if raw_hall else ""
+
+        main_label = fix_arabic(code_val)
+        sub_label = fix_arabic(f"(شـ {sec_id}{hall_str})")
+
+        for b in section["blocks"]:
+            if b["start_time"] in sorted_hours:
+                row_idx = sorted_hours.index(b["start_time"])
+                col_idx = col_map.get(b["day"])
+                if col_idx is not None:
+                    cell_text[row_idx][col_idx] = main_label
+                    cell_details[row_idx][col_idx] = sub_label
+
+    # Build Matplotlib table
+    table = ax.table(
+        cellText=[["" for _ in range(6)] for _ in range(num_rows)],
+        colLabels=cols_reshaped,
+        loc="center",
+        cellLoc="center",
+    )
+    table.scale(1, 2.5)
+
+    # Check available system font safely
+    available_fonts = fm.get_font_names()
+    chosen_font = "Tajawal" if "Tajawal" in available_fonts else "Segoe UI"
+
+    # Style cells to match the dark theme, borders, and colors precisely
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor("#333333")
+        cell.set_linewidth(1.0)
+
+        if row == 0:
+            # Header Row (Dark Gray)
+            cell.set_facecolor("#212121")
+            text_obj = cell.get_text()
+            text_obj.set_text(cols_reshaped[col])
+            text_obj.set_fontname(chosen_font)
+            text_obj.set_fontsize(13)
+            text_obj.set_color("white")
+            text_obj.set_weight("bold")
+        else:
+            r_idx = row - 1
+            hour_val = sorted_hours[r_idx]
+
+            if col == 0:
+                # Time Column (Dark Gray)
+                cell.set_facecolor("#212121")
+                text_obj = cell.get_text()
+                text_obj.set_text(cell_text[r_idx][0])
+                text_obj.set_fontname(chosen_font)
+                text_obj.set_fontsize(12)
+                text_obj.set_color("white")
+                text_obj.set_weight("bold")
+            else:
+                day_num = 6 - col  # Maps back columns to days (Sunday=1 to Thursday=5)
+                has_content = cell_text[r_idx][col] != ""
+
+                if has_content:
+                    # Active Class Cell (Solid Black)
+                    cell.set_facecolor("#000000")
+                    main_str = cell_text[r_idx][col]
+                    sub_str = cell_details[r_idx][col]
+                    text_obj = cell.get_text()
+                    text_obj.set_text(f"{main_str}\n{sub_str}")
+                    text_obj.set_fontname(chosen_font)
+                    text_obj.set_fontsize(11)
+                    text_obj.set_color("white")
+                elif day_num == 2 and hour_val == 10:
+                    # Special red slot for Monday 10:00 AM (#220306)
+                    cell.set_facecolor("#220306")
+                    cell.get_text().set_text("")
+                else:
+                    # Empty cell (Solid Black)
+                    cell.set_facecolor("#000000")
+                    cell.get_text().set_text("")
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="jpg", dpi=300, bbox_inches="tight", facecolor='#000000')
+    buf.seek(0)
+    plt.close(fig)
+    return buf.getvalue()
+
 if not schedules:
     st.warning("No Valid Schedule Found.")
 else:
@@ -1262,7 +1347,7 @@ else:
 
     total_count = len(schedules)
     options_list = [f"Schedule {i+1:03d} of {total_count}" for i in range(total_count)]
-    
+
     selected_option = st.selectbox(
         "Select Schedule",
         options=options_list,
@@ -1270,31 +1355,40 @@ else:
         label_visibility="collapsed",
         key="sched_selectbox"
     )
-    
+
     new_idx = options_list.index(selected_option)
     if new_idx != st.session_state.sched_idx:
         st.session_state.sched_idx = new_idx
         st.rerun()
 
     active_sched = schedules[st.session_state.sched_idx]
+# =============================================================================================================================
+# =============================================================================================================================
+# =============================================================================================================================
 
-    # --- 1. VISUAL VIEW SUBHEADING & TABLE ---
+# --- 1. VISUAL VIEW SUBHEADING & TABLE ---
     st.subheader("A. Visual View")
-    
+
     active_hours = set()
     for section in active_sched:
         for b in section["blocks"]:
             active_hours.add(b["start_time"])
 
+    # Table background set to black, grid lines set to subtle dark gray (#333333)
     html_grid = "<table dir='rtl' style='width:100%; text-align:center; border-collapse: collapse; font-family: \"Tajawal\", sans-serif; background-color: #000000; color: #ffffff; border: 1px solid #333333;'>"
+
+    # First row (Header) is dark gray (#212121) with white text and dark gray borders
     html_grid += "<tr style='background-color: #212121; color: #ffffff;'>"
     html_grid += "<th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الوقت</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الأحد</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الاثنين</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الثلاثاء</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الأربعاء</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الخميس</th></tr>"
 
     col_map_html = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
+
     sorted_active_hours = sorted(list(active_hours))
 
     for hour in sorted_active_hours:
         html_grid += "<tr style='background-color: #000000; border: 1px solid #333333;'>"
+
+        # First column (Time column) is dark gray (#212121) with white text
         html_grid += f"<td style='background-color: #212121; color: #ffffff; border: 1px solid #333333; padding: 8px;'><b>{hour}:00</b></td>"
 
         row_cells = [""] * 5
@@ -1308,13 +1402,15 @@ else:
                         code_val = section.get('code', '')
                         sec_id = section.get('id', '')
                         raw_hall = str(section.get('hall', '')).replace("ش", "").replace("SHR", "").strip()
-                        
+
                         details_display = f"<br><small style='color: #ffffff;'>(شـ {sec_id} - قــ {raw_hall})</small>" if raw_hall else f"<br><small style='color: #ffffff;'>(شـ {sec_id})</small>"
                         row_cells[c_idx - 1] = f"<b style='color: #ffffff;'>{code_val}</b>{details_display}"
                         row_cell_meta[c_idx - 1] = {"day": b["day"], "hour": hour}
 
         for idx, c in enumerate(row_cells):
-            day_num = idx + 1
+            day_num = idx + 1 # 1: Sunday, 2: Monday, etc.
+
+            # Special slot for Monday (2) at 10 AM (10) set to exact hex #220306
             if not c and day_num == 2 and hour == 10:
                 cell_bg = "#220306"
                 cell_style = f"border: 1px solid #333333; padding: 10px; background-color: {cell_bg}; color: #ffffff;"
@@ -1323,6 +1419,7 @@ else:
                 cell_bg = "#000000"
                 html_grid += f"<td style='border: 1px solid #333333; padding: 10px; background-color: {cell_bg}; color: #ffffff;'>{c}</td>"
             else:
+                # Empty cell with crossed lines pattern matching your dark color palette
                 crossed_lines_bg = (
                     "background-color: #000000; "
                     "background-image: linear-gradient(45deg, #16261a 25%, transparent 25%), "
@@ -1338,7 +1435,7 @@ else:
 
     html_grid += "</table>"
     st.markdown(html_grid, unsafe_allow_html=True)
-    
+
     # --- 2. EXCEL VIEW SUBHEADING & TABLE ---
     st.subheader("B. Excel View")
 
@@ -1353,11 +1450,13 @@ else:
         code_val = s.get('code', '')
 
         excel_rows_html += "<tr>"
+        # Standard black background for columns 1 to 5
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{status_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{teacher_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{venue_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{hall_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{id_val}</td>'
+        # Highlighted dark gray (#212121) for المقرر and رمز المقرر
         excel_rows_html += f'<td style="background-color: #212121; color: #ffffff; border: 1px solid #333333;">{name_val}</td>'
         excel_rows_html += f'<td style="background-color: #212121; color: #ffffff; border: 1px solid #333333;">{code_val}</td>'
         excel_rows_html += "</tr>"
