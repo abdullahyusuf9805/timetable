@@ -487,8 +487,10 @@ def init_browser_and_get_captcha():
     driver = webdriver.Chrome(service=service, options=options)
     
     try:
+        # Ensure the headless window is properly sized so elements have a non-zero width
+        driver.set_window_size(1920, 1080)
         driver.get("https://sso.iu.edu.sa")
-        time.sleep(2) 
+        time.sleep(3) # Give it an extra second to render fully
         
         try:
             uni_login_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'الجامعي') or contains(text(), 'Employee')]")
@@ -498,8 +500,9 @@ def init_browser_and_get_captcha():
         except:
             pass 
 
+        # Wait until images are present and have loaded dimensions
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, "img"))
+            lambda d: len(d.find_elements(By.TAG_NAME, "img")) > 0
         )
 
         captcha_img_element = None
@@ -519,15 +522,17 @@ def init_browser_and_get_captcha():
             except:
                 continue
 
-        if not captcha_img_element:
+    if not captcha_img_element:
             images = driver.find_elements(By.TAG_NAME, "img")
             if images:
                 captcha_img_element = images[-1]
             else:
                 raise Exception("Could not locate the CAPTCHA image on the SSO page.")
         
+        # Ensure the element is fully rendered before screenshotting
+        time.sleep(1)
         img_bytes = captcha_img_element.screenshot_as_png
-        
+                
         st.session_state.live_driver = driver
         st.session_state.captcha_img_bytes = img_bytes
         st.session_state.waiting_for_captcha = True
