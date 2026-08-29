@@ -97,7 +97,7 @@ st.markdown(
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) > div > div[data-testid="stVerticalBlock"]::-webkit-scrollbar {
         display: none !important;
     }
-
+    
     /* 3. ANTI-SQUISH: Lock each button's parent container to EXACTLY 44px */
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) > div > div[data-testid="stVerticalBlock"] > div.element-container {
         flex: 0 0 44px !important; 
@@ -184,7 +184,7 @@ st.markdown(
 st.title("DYNAMIC TIMETABLE GENERATOR")
 
 # ==========================================
-# 2. INITIALIZE SESSION STATES
+# 2. INITIALIZE SESSION STATES (MULTI-USER)
 # ==========================================
 if "user_session_id" not in st.session_state:
     import uuid
@@ -194,6 +194,8 @@ if "live_html_data" not in st.session_state:
     st.session_state.live_html_data = None
 if "auto_enrolled" not in st.session_state:
     st.session_state.auto_enrolled = ""
+if "raw_enrolled_html_data" not in st.session_state:
+    st.session_state.raw_enrolled_html_data = None
 if "waiting_for_captcha" not in st.session_state:
     st.session_state.waiting_for_captcha = False
 if "live_driver" not in st.session_state:
@@ -209,12 +211,9 @@ if "error_screenshot_bytes" not in st.session_state:
 html_content = ""
 if st.session_state.get("live_html_data"):
     html_content = st.session_state.live_html_data
-elif os.path.exists("data.html"):
-    with open("data.html", "r", encoding="utf-8") as f:
-        html_content = f.read()
 
 time_match = re.search(r"<!-- SYNC_TIME: (.*?) -->", html_content)
-updated_str = time_match.group(1) if time_match else "No data file found"
+updated_str = time_match.group(1) if time_match else "Not synced yet"
 
 # Display Last Update on the Main Page
 st.markdown(
@@ -230,14 +229,12 @@ if st.session_state.get("captcha_img_bytes"):
     try:
         image_stream = io.BytesIO(st.session_state.captcha_img_bytes)
         img = Image.open(image_stream).convert("RGB") 
-        # Invert colors (White background becomes black, dark text becomes bright)
         inverted_img = ImageOps.invert(img)
         rgba_img = inverted_img.convert("RGBA")
         data = rgba_img.getdata()
         
         new_data = []
         for item in data:
-            # Turn the new black background transparent
             if item[0] < 60 and item[1] < 60 and item[2] < 60:
                 new_data.append((255, 255, 255, 0)) 
             else:
@@ -256,7 +253,6 @@ st.markdown(
     <style>
         .stCaption {{display: none;}}
         
-        /* 4-Color Theme: Black, Dark Gray, Light Gray, White */
         .stApp {{
             background-color: #000000;
             color: #ffffff;
@@ -294,7 +290,6 @@ st.markdown(
             text-align: center;
         }}
         
-        /* UI TIGHTENING CSS (Squish Elements in Card) */
         [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {{
             padding: 0.2rem 0.8rem 0.2rem 0.8rem !important; 
             background-color: #1a1a1a !important;
@@ -303,7 +298,6 @@ st.markdown(
             margin-bottom: 12px !important;
         }}
         
-        /* Pull the button closer to the header text */
         [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stMarkdownContainer"] {{
             margin-bottom: -10px !important;
         }}
@@ -316,7 +310,6 @@ st.markdown(
             margin-bottom: 0px !important; 
         }}
         
-        /* NUCLEAR CSS: DESTROY TOOLTIPS & TICK BARS */
         [data-testid="stTickBar"], 
         [data-testid="stTickBarMin"], 
         [data-testid="stTickBarMax"] {{
@@ -348,7 +341,6 @@ st.markdown(
             align-items: center !important;
         }}
 
-        /* CAPTCHA INJECTION & FORM STYLING */
         [data-testid="stSidebar"] input[aria-label^="CAPTCHA"] {{
             background-image: url("data:image/png;base64,{captcha_b64}") !important;
             background-position: right 6px center !important;
@@ -447,7 +439,6 @@ st.markdown(
             line-height: 1.3 !important;
         }}
 
-        /* FIX SPINNER ALIGNMENT */
         [data-testid="stSpinner"] {{
             align-items: center !important;
             margin-top: 10px !important;
@@ -485,7 +476,7 @@ def init_browser_and_get_captcha():
     options.add_argument('--window-size=1920,1080')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
-    # Isolate user session data directory to prevent cross-user collisions
+    # Isolate user profile directory for session safety
     user_data_dir = tempfile.mkdtemp()
     options.add_argument(f"--user-data-dir={user_data_dir}")
     options.add_argument("--remote-debugging-pipe")
@@ -503,15 +494,38 @@ def init_browser_and_get_captcha():
             uni_login_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'الجامعي') or contains(text(), 'Employee')]")
             if uni_login_btn.is_displayed():
                 driver.execute_script("arguments[0].click();", uni_login_btn)
-                time.sleep(1)
+                time.sleep(1.5)
         except:
             pass 
 
-        try:
-            captcha_img_element = driver.find_element(By.XPATH, "//img[contains(translate(@src, 'CAPTCHA', 'captcha'), 'captcha')]")
-        except:
-            captcha_img_element = driver.find_element(By.XPATH, "(//form//img)[last()]")
-            
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "img"))
+        )
+
+        captcha_img_element = None
+        selectors = [
+            "//img[contains(translate(@src, 'CAPTCHA', 'captcha'), 'captcha')]",
+            "//img[contains(@id, 'captcha') or contains(@class, 'captcha')]",
+            "//form//img[last()]",
+            "//img[contains(@src, 'Captcha') or contains(@src, 'Jcaptcha')]"
+        ]
+
+        for sel in selectors:
+            try:
+                element = driver.find_element(By.XPATH, sel)
+                if element.is_displayed():
+                    captcha_img_element = element
+                    break
+            except:
+                continue
+
+        if not captcha_img_element:
+            images = driver.find_elements(By.TAG_NAME, "img")
+            if images:
+                captcha_img_element = images[-1]
+            else:
+                raise Exception("Could not locate the CAPTCHA image on the SSO page.")
+        
         img_bytes = captcha_img_element.screenshot_as_png
         
         st.session_state.live_driver = driver
@@ -611,7 +625,7 @@ def submit_captcha_and_scrape(username, password, captcha_val):
                 break
                 
         if target_tbody is None:
-            driver.save_screenshot("error_screenshot.png")
+            st.session_state.error_screenshot_bytes = driver.get_screenshot_as_png()
             raise Exception("Could not find the main timetable <tbody>.")
             
         final_html = f"<!-- SYNC_TIME: {time_str} -->\n<!-- STUDENT_ID: {username} -->\n" + str(target_tbody)
@@ -718,8 +732,7 @@ with st.sidebar.container(border=True):
     # --- PHASE 1: Fetch Captcha Session ---
     if not st.session_state.waiting_for_captcha:
         if st.button("Login And Scrap Data from Portal", use_container_width=True):
-            if os.path.exists("error_screenshot.png"):
-                os.remove("error_screenshot.png")
+            st.session_state.error_screenshot_bytes = None
                 
             with st.spinner("Connecting to sso.iu.edu.sa"):
                 try:
@@ -730,7 +743,6 @@ with st.sidebar.container(border=True):
 
     # --- PHASE 2: The UI Form ---
     else:
-        # Dynamically invert, remove background, and inject the CAPTCHA
         if st.session_state.get("captcha_img_bytes"):
             try:
                 image_stream = io.BytesIO(st.session_state.captcha_img_bytes)
@@ -791,35 +803,25 @@ with st.sidebar.container(border=True):
                             st.session_state.portal_pass, 
                             user_captcha
                         )
+                        
+                        # SAVE DIRECTLY IN SESSION STATE (Multi-user safe)
                         st.session_state.live_html_data = raw_live_html
+                        st.session_state.raw_enrolled_html_data = raw_enrolled_html
                         st.session_state.auto_enrolled = auto_enrolled
                         
-                        # Use user-specific filenames so multiple concurrent users don't overwrite each other
-                        user_data_filename = f"data_{st.session_state.portal_user}.html"
-                        with open(user_data_filename, "w", encoding="utf-8") as f:
-                            f.write(f"<!-- STUDENT_ID: {st.session_state.portal_user} -->\n")
-                            f.write(raw_live_html)
-                            
-                        user_enrolled_filename = f"enrolled_{st.session_state.portal_user}.html"
-                        with open(user_enrolled_filename, "w", encoding="utf-8") as f:
-                            f.write(f"<!-- STUDENT_ID: {st.session_state.portal_user} -->\n")
-                            f.write(raw_enrolled_html)    
-                            
                         if "GITHUB_TOKEN" in st.secrets and "GITHUB_REPO" in st.secrets:
                             try:
                                 g = Github(st.secrets["GITHUB_TOKEN"])
                                 repo = g.get_repo(st.secrets["GITHUB_REPO"])
                                 push_to_github(repo, "data.html", raw_live_html, "Bot synced timetable <tbody>")
                                 push_to_github(repo, "enrolled.html", raw_enrolled_html, "Bot synced enrolled classes <tbody>")
-                                st.success("✅ Synced and pushed both files to GitHub!")
+                                st.success("✅ Synced session data and pushed both files to GitHub!")
                             except Exception as github_e:
-                                st.warning(f"Saved locally, but GitHub push failed: {github_e}")
+                                st.warning(f"Saved in session state, but GitHub push failed: {github_e}")
                         else:
-                            st.success("✅ Saved locally (GitHub secrets not configured).")
+                            st.success("✅ Synced and saved session state successfully.")
                         
-                        if os.path.exists("error_screenshot.png"):
-                            os.remove("error_screenshot.png")
-                            
+                        st.session_state.error_screenshot_bytes = None
                         st.rerun() 
                             
                     except Exception as e:
@@ -855,31 +857,16 @@ if raw_df is None or raw_df.empty:
 with st.sidebar.container(border=True):
     st.markdown("### 📥 Export Raw Data")
     try:
-        import re
-        import os
-        import pandas as pd
-        
-        # 1. Extract and format the exact sync time & ID from data.html
         formatted_time = "UnknownTime"
-        extracted_id = "UnknownID"
+        extracted_id = st.session_state.get("portal_user", "UnknownID")
         
-        if os.path.exists("data.html"):
-            with open("data.html", "r", encoding="utf-8") as f:
-                content = f.read(500) # Increased size to catch both comments
-                
-                # Get Time
-                match_time = re.search(r'<!-- SYNC_TIME:\s*(.*?)\s*-->', content)
-                if match_time:
-                    raw_time_str = match_time.group(1)
-                    parsed_time = pd.to_datetime(raw_time_str) 
-                    formatted_time = parsed_time.strftime("%d%m%y%H%M")
-                    
-                # Get Student ID
-                match_id = re.search(r'<!-- STUDENT_ID:\s*(.*?)\s*-->', content)
-                if match_id:
-                    extracted_id = match_id.group(1).strip()
+        if st.session_state.get("live_html_data"):
+            match_time = re.search(r'<!-- SYNC_TIME:\s*(.*?)\s*-->', st.session_state.live_html_data)
+            if match_time:
+                raw_time_str = match_time.group(1)
+                parsed_time = pd.to_datetime(raw_time_str) 
+                formatted_time = parsed_time.strftime("%d%m%y%H%M")
         
-        # 2. Build the exact filename requested
         excel_filename = f"MATROOHAT ({extracted_id}) {formatted_time}.xlsx"
         
         raw_excel_buffer = io.BytesIO()
@@ -928,12 +915,6 @@ parsed_df = parse_schedule_blocks(raw_df)
 if parsed_df.empty:
     st.error("⚠️ The scraped data contains no valid schedule blocks. The university portal might be empty.")
     st.stop()
-
-# =========================================================================================================================
-# =========================================================================================================================
-# ===============================================Filters===================================================================
-# =========================================================================================================================
-# =========================================================================================================================
 
 # ==========================================
 # 9. PURE NATIVE STREAMLIT FILTERS (Tight UI)
@@ -1026,15 +1007,14 @@ with st.sidebar.expander("⚙️ Filter By Availability", expanded=st.session_st
     enrolled_ids_str = st.session_state.get("auto_enrolled", "")
     enrolled_ids = [s.strip() for s in enrolled_ids_str.split(",") if s.strip()]
 
-    if not enrolled_ids and os.path.exists("enrolled.html"):
-        with open("enrolled.html", "r", encoding="utf-8") as f:
-            soup_enc = BeautifulSoup(f.read(), "html.parser")
-            for tr in soup_enc.find_all("tr", class_=lambda c: c in ["ROW1", "ROW2"]):
-                cols = tr.find_all("td")
-                if len(cols) >= 4:
-                    sh = cols[3].text.strip()
-                    if sh.isdigit():
-                        enrolled_ids.append(sh)
+    if not enrolled_ids and st.session_state.get("raw_enrolled_html_data"):
+        soup_enc = BeautifulSoup(st.session_state.raw_enrolled_html_data, "html.parser")
+        for tr in soup_enc.find_all("tr", class_=lambda c: c in ["ROW1", "ROW2"]):
+            cols = tr.find_all("td")
+            if len(cols) >= 4:
+                sh = cols[3].text.strip()
+                if sh.isdigit():
+                    enrolled_ids.append(sh)
 
     if "STATUS" in raw_df.columns:
         show_opened = st.checkbox("Opened", value=True)
@@ -1136,7 +1116,6 @@ with st.sidebar.expander("⚙️ Filter By teachers", expanded=st.session_state[
 
             subject_rules[subj] = {"ban": banned_t, "require": required_t}
 
-# Process the rules correctly
 for subj, rules in subject_rules.items():
     if rules["ban"]:
         valid_blocks_df = valid_blocks_df[
@@ -1153,13 +1132,10 @@ for subj, rules in subject_rules.items():
             )
         ]
 
-
-
 # ==========================================
 # 12. DATA GROUPING & SOLVER
 # ==========================================
 sections_by_subject = {}
-# Use an ordered collection to preserve the exact appearance order from raw_df
 for code, group in valid_blocks_df.groupby("CODE", sort=False):
     sections_by_subject[str(code)] = []
     for sec_id, sec_group in group.groupby("ID", sort=False):
@@ -1251,125 +1227,6 @@ def fix_arabic(text):
         return ""
     return get_display(arabic_reshaper.reshape(str(text)))
 
-def draw_schedule_image(schedule):
-    import matplotlib.font_manager as fm
-    
-    # Setup figure with dark background
-    fig, ax = plt.subplots(figsize=(12, 7), facecolor='#000000')
-    ax.set_facecolor('#000000')
-    ax.axis("tight")
-    ax.axis("off")
-
-    # Correct right-to-left column headers matching visual view
-    cols = ["الوقت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"]
-    cols_reshaped = [fix_arabic(c) for c in cols]
-
-    # Dynamically find active hours just like the visual view
-    active_hours = set()
-    for section in schedule:
-        for b in section["blocks"]:
-            active_hours.add(b["start_time"])
-    sorted_hours = sorted(list(active_hours))
-
-    if not sorted_hours:
-        sorted_hours = list(range(8, 13))
-
-    num_rows = len(sorted_hours)
-    cell_text = [["" for _ in range(6)] for _ in range(num_rows)]
-    cell_details = [["" for _ in range(6)] for _ in range(num_rows)]
-    
-    # Map day numbers to column index (Sunday=1 -> col 1, Monday=2 -> col 2, etc.)
-    col_map = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
-
-    for row_idx, hour in enumerate(sorted_hours):
-        cell_text[row_idx][0] = f"{hour}:00"
-
-    for section in schedule:
-        code_val = section['code']
-        sec_id = section['id']
-        raw_hall = str(section.get('hall', '')).replace("ش", "").replace("SHR", "").strip()
-        hall_str = f" - قــ {raw_hall}" if raw_hall else ""
-        
-        main_label = fix_arabic(code_val)
-        sub_label = fix_arabic(f"(شـ {sec_id}{hall_str})")
-
-        for b in section["blocks"]:
-            if b["start_time"] in sorted_hours:
-                row_idx = sorted_hours.index(b["start_time"])
-                col_idx = col_map.get(b["day"])
-                if col_idx is not None:
-                    cell_text[row_idx][col_idx] = main_label
-                    cell_details[row_idx][col_idx] = sub_label
-
-    # Build Matplotlib table
-    table = ax.table(
-        cellText=[["" for _ in range(6)] for _ in range(num_rows)],
-        colLabels=cols_reshaped,
-        loc="center",
-        cellLoc="center",
-    )
-    table.scale(1, 2.5)
-
-    # Check available system font safely
-    available_fonts = fm.get_font_names()
-    chosen_font = "Tajawal" if "Tajawal" in available_fonts else "Segoe UI"
-
-    # Style cells to match the dark theme, borders, and colors precisely
-    for (row, col), cell in table.get_celld().items():
-        cell.set_edgecolor("#333333")
-        cell.set_linewidth(1.0)
-        
-        if row == 0:
-            # Header Row (Dark Gray)
-            cell.set_facecolor("#212121")
-            text_obj = cell.get_text()
-            text_obj.set_text(cols_reshaped[col])
-            text_obj.set_fontname(chosen_font)
-            text_obj.set_fontsize(13)
-            text_obj.set_color("white")
-            text_obj.set_weight("bold")
-        else:
-            r_idx = row - 1
-            hour_val = sorted_hours[r_idx]
-            
-            if col == 0:
-                # Time Column (Dark Gray)
-                cell.set_facecolor("#212121")
-                text_obj = cell.get_text()
-                text_obj.set_text(cell_text[r_idx][0])
-                text_obj.set_fontname(chosen_font)
-                text_obj.set_fontsize(12)
-                text_obj.set_color("white")
-                text_obj.set_weight("bold")
-            else:
-                day_num = 6 - col  # Maps back columns to days (Sunday=1 to Thursday=5)
-                has_content = cell_text[r_idx][col] != ""
-                
-                if has_content:
-                    # Active Class Cell (Solid Black)
-                    cell.set_facecolor("#000000")
-                    main_str = cell_text[r_idx][col]
-                    sub_str = cell_details[r_idx][col]
-                    text_obj = cell.get_text()
-                    text_obj.set_text(f"{main_str}\n{sub_str}")
-                    text_obj.set_fontname(chosen_font)
-                    text_obj.set_fontsize(11)
-                    text_obj.set_color("white")
-                elif day_num == 2 and hour_val == 10:
-                    # Special red slot for Monday 10:00 AM (#220306)
-                    cell.set_facecolor("#220306")
-                    cell.get_text().set_text("")
-                else:
-                    # Empty cell (Solid Black)
-                    cell.set_facecolor("#000000")
-                    cell.get_text().set_text("")
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format="jpg", dpi=300, bbox_inches="tight", facecolor='#000000')
-    buf.seek(0)
-    plt.close(fig)
-    return buf.getvalue()
-
 if not schedules:
     st.warning("No Valid Schedule Found.")
 else:
@@ -1417,11 +1274,8 @@ else:
         st.rerun()
 
     active_sched = schedules[st.session_state.sched_idx]
-# =============================================================================================================================
-# =============================================================================================================================
-# =============================================================================================================================
 
-# --- 1. VISUAL VIEW SUBHEADING & TABLE ---
+    # --- 1. VISUAL VIEW SUBHEADING & TABLE ---
     st.subheader("A. Visual View")
     
     active_hours = set()
@@ -1429,21 +1283,15 @@ else:
         for b in section["blocks"]:
             active_hours.add(b["start_time"])
 
-    # Table background set to black, grid lines set to subtle dark gray (#333333)
     html_grid = "<table dir='rtl' style='width:100%; text-align:center; border-collapse: collapse; font-family: \"Tajawal\", sans-serif; background-color: #000000; color: #ffffff; border: 1px solid #333333;'>"
-    
-    # First row (Header) is dark gray (#212121) with white text and dark gray borders
     html_grid += "<tr style='background-color: #212121; color: #ffffff;'>"
     html_grid += "<th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الوقت</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الأحد</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الاثنين</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الثلاثاء</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الأربعاء</th><th style='border: 1px solid #333333; padding: 8px; color: #ffffff;'>الخميس</th></tr>"
 
     col_map_html = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
-
     sorted_active_hours = sorted(list(active_hours))
 
     for hour in sorted_active_hours:
         html_grid += "<tr style='background-color: #000000; border: 1px solid #333333;'>"
-        
-        # First column (Time column) is dark gray (#212121) with white text
         html_grid += f"<td style='background-color: #212121; color: #ffffff; border: 1px solid #333333; padding: 8px;'><b>{hour}:00</b></td>"
 
         row_cells = [""] * 5
@@ -1463,9 +1311,7 @@ else:
                         row_cell_meta[c_idx - 1] = {"day": b["day"], "hour": hour}
 
         for idx, c in enumerate(row_cells):
-            day_num = idx + 1 # 1: Sunday, 2: Monday, etc.
-            
-            # Special slot for Monday (2) at 10 AM (10) set to exact hex #220306
+            day_num = idx + 1
             if not c and day_num == 2 and hour == 10:
                 cell_bg = "#220306"
                 cell_style = f"border: 1px solid #333333; padding: 10px; background-color: {cell_bg}; color: #ffffff;"
@@ -1474,7 +1320,6 @@ else:
                 cell_bg = "#000000"
                 html_grid += f"<td style='border: 1px solid #333333; padding: 10px; background-color: {cell_bg}; color: #ffffff;'>{c}</td>"
             else:
-                # Empty cell with crossed lines pattern matching your dark color palette
                 crossed_lines_bg = (
                     "background-color: #000000; "
                     "background-image: linear-gradient(45deg, #16261a 25%, transparent 25%), "
@@ -1505,13 +1350,11 @@ else:
         code_val = s.get('code', '')
 
         excel_rows_html += "<tr>"
-        # Standard black background for columns 1 to 5
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{status_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{teacher_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{venue_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{hall_val}</td>'
         excel_rows_html += f'<td style="background-color: #000000; color: #ffffff; border: 1px solid #333333;">{id_val}</td>'
-        # Highlighted dark gray (#212121) for المقرر and رمز المقرر
         excel_rows_html += f'<td style="background-color: #212121; color: #ffffff; border: 1px solid #333333;">{name_val}</td>'
         excel_rows_html += f'<td style="background-color: #212121; color: #ffffff; border: 1px solid #333333;">{code_val}</td>'
         excel_rows_html += "</tr>"
@@ -1561,7 +1404,3 @@ else:
     """
 
     st.markdown(excel_table_html, unsafe_allow_html=True)
-
-# =============================================================================================================================
-# =============================================================================================================================    
-# =============================================================================================================================    
