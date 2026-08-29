@@ -186,14 +186,22 @@ st.title("DYNAMIC TIMETABLE GENERATOR")
 # ==========================================
 # 2. INITIALIZE SESSION STATES
 # ==========================================
+if "user_session_id" not in st.session_state:
+    import uuid
+    st.session_state.user_session_id = str(uuid.uuid4())
+
 if "live_html_data" not in st.session_state:
     st.session_state.live_html_data = None
+if "auto_enrolled" not in st.session_state:
+    st.session_state.auto_enrolled = ""
 if "waiting_for_captcha" not in st.session_state:
     st.session_state.waiting_for_captcha = False
 if "live_driver" not in st.session_state:
     st.session_state.live_driver = None
 if "captcha_img_bytes" not in st.session_state:
     st.session_state.captcha_img_bytes = None
+if "error_screenshot_bytes" not in st.session_state:
+    st.session_state.error_screenshot_bytes = None
 
 # ==========================================
 # 3. GET SYNC TIME FOR UI
@@ -467,6 +475,8 @@ st.markdown(
 # ==========================================
 
 def init_browser_and_get_captcha():
+import tempfile
+    
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
@@ -475,6 +485,11 @@ def init_browser_and_get_captcha():
     options.add_argument('--window-size=1920,1080')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
+    # Isolate user session data directory to prevent cross-user collisions
+    user_data_dir = tempfile.mkdtemp()
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument("--remote-debugging-pipe")
+
     options.binary_location = "/usr/bin/chromium"
     service = Service("/usr/bin/chromedriver")
     
@@ -530,7 +545,7 @@ def submit_captcha_and_scrape(username, password, captcha_val):
         try:
             WebDriverWait(driver, 15).until(EC.url_contains("Dashboard"))
         except:
-            driver.save_screenshot("error_screenshot.png")
+            st.session_state.error_screenshot_bytes = driver.get_screenshot_as_png()
             raise Exception("Login rejected! Please check your Student ID, Password, or CAPTCHA.")
             
         ksa_time = datetime.utcnow() + timedelta(hours=3)
@@ -779,13 +794,16 @@ with st.sidebar.container(border=True):
                         st.session_state.live_html_data = raw_live_html
                         st.session_state.auto_enrolled = auto_enrolled
                         
-                        with open("data.html", "w", encoding="utf-8") as f:
+                        # Use user-specific filenames so multiple concurrent users don't overwrite each other
+                        user_data_filename = f"data_{st.session_state.portal_user}.html"
+                        with open(user_data_filename, "w", encoding="utf-8") as f:
                             f.write(f"<!-- STUDENT_ID: {st.session_state.portal_user} -->\n")
                             f.write(raw_live_html)
                             
-                        with open("enrolled.html", "w", encoding="utf-8") as f:
+                        user_enrolled_filename = f"enrolled_{st.session_state.portal_user}.html"
+                        with open(user_enrolled_filename, "w", encoding="utf-8") as f:
                             f.write(f"<!-- STUDENT_ID: {st.session_state.portal_user} -->\n")
-                            f.write(raw_enrolled_html)
+                            f.write(raw_enrolled_html)    
                             
                         if "GITHUB_TOKEN" in st.secrets and "GITHUB_REPO" in st.secrets:
                             try:
@@ -817,22 +835,17 @@ with st.sidebar.container(border=True):
 # 6. READ SCRAPED DATA (CRITICAL)
 # ==========================================
 raw_df = pd.DataFrame() 
-if st.session_state.live_html_data:
+if st.session_state.get("live_html_data"):
     raw_df = parse_html_to_dataframe(st.session_state.live_html_data)
-elif os.path.exists("data.html"):
-    with open("data.html", "r", encoding="utf-8") as f:
-        file_html_content = f.read()
-        if file_html_content.strip():
-            raw_df = parse_html_to_dataframe(file_html_content)
 
 # Safety kill switch
 if raw_df is None or raw_df.empty:
     if st.session_state.waiting_for_captcha:
         pass # Let the user fill out the form
     else:
-        st.error("⚠️ No schedule data found. Please login to fetch fresh data.")
-        if os.path.exists("error_screenshot.png"):
-            st.image("error_screenshot.png", caption="Bot's view during the last failed attempt:")
+        st.info("👋 Welcome! Please log in via the sidebar portal to fetch your schedule.")
+        if st.session_state.get("error_screenshot_bytes"):
+            st.image(st.session_state.error_screenshot_bytes, caption="Bot's view during the last failed attempt:")
     st.stop()
 
 
