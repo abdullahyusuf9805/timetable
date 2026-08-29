@@ -475,7 +475,7 @@ st.markdown(
 # ==========================================
 
 def init_browser_and_get_captcha():
-import tempfile
+    import tempfile
     
     options = Options()
     options.add_argument('--headless')
