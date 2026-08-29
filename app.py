@@ -522,7 +522,7 @@ def init_browser_and_get_captcha():
             except:
                 continue
 
-    if not captcha_img_element:
+        if not captcha_img_element:
             images = driver.find_elements(By.TAG_NAME, "img")
             if images:
                 captcha_img_element = images[-1]
