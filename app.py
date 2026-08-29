@@ -97,7 +97,7 @@ st.markdown(
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) > div > div[data-testid="stVerticalBlock"]::-webkit-scrollbar {
         display: none !important;
     }
-    
+
     /* 3. ANTI-SQUISH: Lock each button's parent container to EXACTLY 44px */
     div.element-container:has(#my-paginator) + div.element-container > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) > div > div[data-testid="stVerticalBlock"] > div.element-container {
         flex: 0 0 44px !important; 
@@ -246,7 +246,6 @@ if st.session_state.get("captcha_img_bytes"):
         captcha_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
     except Exception:
         captcha_b64 = base64.b64encode(st.session_state.captcha_img_bytes).decode("utf-8")
-
 
 st.markdown(
     f"""
@@ -490,7 +489,7 @@ def init_browser_and_get_captcha():
         # Ensure the headless window is properly sized so elements have a non-zero width
         driver.set_window_size(1920, 1080)
         driver.get("https://sso.iu.edu.sa")
-        time.sleep(3) # Give it an extra second to render fully
+        time.sleep(3) 
         
         try:
             uni_login_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'الجامعي') or contains(text(), 'Employee')]")
@@ -500,39 +499,38 @@ def init_browser_and_get_captcha():
         except:
             pass 
 
-        # Wait until images are present and have loaded dimensions
-        WebDriverWait(driver, 10).until(
-            lambda d: len(d.find_elements(By.TAG_NAME, "img")) > 0
+        # Wait until at least one image with an actual width is rendered on the screen
+        WebDriverWait(driver, 15).until(
+            lambda d: any(img.size['width'] > 0 for img in d.find_elements(By.TAG_NAME, "img"))
         )
 
-        captcha_img_element = None
-        selectors = [
-            "//img[contains(translate(@src, 'CAPTCHA', 'captcha'), 'captcha')]",
-            "//img[contains(@id, 'captcha') or contains(@class, 'captcha')]",
-            "//form//img[last()]",
-            "//img[contains(@src, 'Captcha') or contains(@src, 'Jcaptcha')]"
+        # Get ONLY images that have physical dimensions (filters out hidden tracking pixels)
+        visible_images = [
+            img for img in driver.find_elements(By.TAG_NAME, "img") 
+            if img.size['width'] > 0 and img.size['height'] > 0
         ]
 
-        for sel in selectors:
-            try:
-                element = driver.find_element(By.XPATH, sel)
-                if element.is_displayed():
-                    captcha_img_element = element
-                    break
-            except:
-                continue
+        if not visible_images:
+            raise Exception("No visible images found on the login page.")
 
+        # Identify the CAPTCHA among the visible images
+        captcha_img_element = None
+        for img in visible_images:
+            src = (img.get_attribute("src") or "").lower()
+            img_id = (img.get_attribute("id") or "").lower()
+            img_class = (img.get_attribute("class") or "").lower()
+            
+            if "captcha" in src or "captcha" in img_id or "captcha" in img_class:
+                captcha_img_element = img
+                break
+
+        # Fallback: Use the last genuinely visible image on the page
         if not captcha_img_element:
-            images = driver.find_elements(By.TAG_NAME, "img")
-            if images:
-                captcha_img_element = images[-1]
-            else:
-                raise Exception("Could not locate the CAPTCHA image on the SSO page.")
+            captcha_img_element = visible_images[-1]
         
-        # Ensure the element is fully rendered before screenshotting
-        time.sleep(1)
+        # Safe screenshot knowing width > 0
         img_bytes = captcha_img_element.screenshot_as_png
-                
+        
         st.session_state.live_driver = driver
         st.session_state.captcha_img_bytes = img_bytes
         st.session_state.waiting_for_captcha = True
